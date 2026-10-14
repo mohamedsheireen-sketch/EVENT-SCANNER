@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Check-in</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 480px; margin: 0 auto; padding: 12px; }
+  input, button { font-size: 16px; padding: 10px; width: 100%; box-sizing: border-box; margin: 4px 0; }
+  #counter { font-size: 28px; font-weight: bold; text-align: center; margin: 8px 0; }
+  #result { font-size: 20px; text-align: center; padding: 16px; margin: 8px 0; background: #eee; color: #000; }
+  #result.ok { background: #7ddc7d; }
+  #result.warn { background: #ffd966; }
+  #result.bad { background: #ff8a80; }
+  #loginMsg { color: #c00; }
+</style>
+</head>
+<body>
+
+<section id="login">
+  <h2>Usher login</h2>
+  <input id="email" type="email" placeholder="Email" autocomplete="username">
+  <input id="password" type="password" placeholder="Password" autocomplete="current-password">
+  <button id="loginBtn">Log in</button>
+  <p id="loginMsg"></p>
+</section>
+
+<section id="app" hidden>
+  <div id="counter">Checked in: - / -</div>
+  <div id="reader"></div>
+  <div id="result">Point the camera at a QR code</div>
+
+  <details>
+    <summary>QR won't scan? Check in by email</summary>
+    <input id="manualEmail" type="email" placeholder="Attendee email">
+    <button id="manualBtn">Check in</button>
+  </details>
+
+  <button id="logoutBtn">Log out</button>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const SUPABASE_URL = 'https://nnrmgriggjjwxicztngd.supabase.co';
+// Publishable key: safe in the browser. Only logged-in ushers can call the check-in functions.
+const SUPABASE_KEY = 'sb_publishable_SC3k0Z5KUlU_T0CoaJ84iw_oe5F-_i-';
+
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const $ = id => document.getElementById(id);
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+let loggedIn = null, scanner = null, scanning = false;
+let busy = false, lastToken = '', lastAt = 0, pollTimer = null, wake = null;
+
+// ---------- UI state ----------
+
+async function show(isIn) {
+  if (isIn === loggedIn) return;
+  loggedIn = isIn;
+  $('login').hidden = isIn;
+  $('app').hidden = !isIn;
+  if (isIn) {
+    refreshCounts();
+    pollTimer = setInterval(refreshCounts, 10000);
+    await startScanner();
+    keepAwake();
+  } else {
+    clearInterval(pollTimer);
+    await stopScanner();
+  }
+}
+
+function setResult(cls, msg) {
+  const r = $('result');
+  r.className = cls;
+  r.textContent = msg; // textContent: attendee names are never parsed as HTML
+}
+
+// Keep the phone screen on while ushers are scanning
+async function keepAwake() {
+  try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && loggedIn) keepAwake();
+});
+
+// ---------- Scanner ----------
+
+async function startScanner() {
+  if (scanning) return;
+  scanner = new Html5Qrcode('reader');
+  try {
+    await scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 10,
+        qrbox: (w, h) => {
+          const s = Math.floor(Math.min(w, h) * 0.7);
+          return { width: s, height: s };
+        },
+      },
+      onScan,
+      () => {} // per-frame "no QR found": ignore
+    );
+    scanning = true;
+  } catch (err) {
+    setResult('bad', 'Camera unavailable (' + err + '). Allow camera access, or use email check-in below.');
+  }
+}
+
+async function stopScanner() {
+  if (!scanning) return;
+  scanning = false;
+  try { await scanner.stop(); scanner.clear(); } catch (e) {}
+}
+
+function onScan(text) {
+  const token = text.trim();
+  const now = Date.now();
+  // ignore reads while a check is running, and the same QR for 8s after it was read
+  if (busy || (token === lastToken && now - lastAt < 8000)) return;
+  lastToken = token;
+  lastAt = now;
+  if (!UUID_RE.test(token)) return setResult('bad', 'Not a valid ticket');
+  checkIn('check_in', { p_token: token });
+}
+
+// ---------- Check-in + counter ----------
+
+async function checkIn(fn, args) {
+  busy = true;
+  setResult('', 'Checking...');
+  const { data, error } = await sb.rpc(fn, args);
+  busy = false;
+
+  if (error) {
+    lastToken = ''; // allow an immediate retry of the same QR
+    return setResult('bad', 'Error: ' + error.message + ' (scan again)');
+  }
+  if (data.status === 'ok') {
+    setResult('ok', '\u2713 Welcome, ' + data.name);
+    if (navigator.vibrate) navigator.vibrate(150);
+  } else if (data.status === 'already') {
+    setResult('warn', 'Already checked in: ' + data.name + ' at ' + new Date(data.attended_at).toLocaleTimeString());
+  } else {
+    setResult('bad', 'Invalid ticket');
+  }
+  refreshCounts();
+}
+
+async function refreshCounts() {
+  const { data, error } = await sb.rpc('get_counts');
+  if (!error && data) $('counter').textContent = 'Checked in: ' + data.checked_in + ' / ' + data.total;
+}
+
+// ---------- Auth + events ----------
+
+$('loginBtn').onclick = async () => {
+  $('loginMsg').textContent = '';
+  const { error } = await sb.auth.signInWithPassword({
+    email: $('email').value.trim(),
+    password: $('password').value,
+  });
+  if (error) $('loginMsg').textContent = error.message;
+};
+$('password').onkeydown = e => { if (e.key === 'Enter') $('loginBtn').click(); };
+$('logoutBtn').onclick = () => sb.auth.signOut();
+
+$('manualBtn').onclick = () => {
+  const email = $('manualEmail').value.trim();
+  if (!email) return;
+  $('manualEmail').value = '';
+  checkIn('check_in_by_email', { p_email: email });
+};
+
+sb.auth.onAuthStateChange((_event, session) => show(!!session));
+sb.auth.getSession().then(({ data }) => show(!!data.session));
+</script>
+</body>
+</html>
