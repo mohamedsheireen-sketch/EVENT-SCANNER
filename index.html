@@ -19,7 +19,7 @@
 
 <section id="login">
   <h2>Usher login</h2>
-  <input id="email" type="email" placeholder="Email" autocomplete="username">
+  <input id="username" type="text" placeholder="Username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
   <input id="password" type="password" placeholder="Password" autocomplete="current-password">
   <button id="loginBtn">Log in</button>
   <p id="loginMsg"></p>
@@ -43,15 +43,64 @@
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 const SUPABASE_URL = 'https://nnrmgriggjjwxicztngd.supabase.co';
-// Publishable key: safe in the browser. Only logged-in ushers can call the check-in functions.
+// Publishable key: safe in the browser. It can only call the usher_* functions;
+// the ushers table is closed to it, and every check-in call needs a valid session token.
 const SUPABASE_KEY = 'sb_publishable_SC3k0Z5KUlU_T0CoaJ84iw_oe5F-_i-';
 
-const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// Logins are checked by our own usher_login() function (username + password in the
+// "ushers" table), not Supabase Auth, so supabase-js is only used to call functions.
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+});
 const $ = id => document.getElementById(id);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SESSION_KEY = 'usher_session';
+const IDLE_MSG = 'Point the camera at a QR code';
 
+let session = null;   // the usher's session token, issued by usher_login
 let loggedIn = null, scanner = null, scanning = false;
 let busy = false, lastToken = '', lastAt = 0, pollTimer = null, wake = null;
+
+// ---------- Session token (kept in this browser so a refresh doesn't log the usher out) ----------
+
+function loadSession() {
+  try { return localStorage.getItem(SESSION_KEY); } catch (e) { return null; }
+}
+function saveSession(token) {
+  try {
+    if (token) localStorage.setItem(SESSION_KEY, token);
+    else localStorage.removeItem(SESSION_KEY);
+  } catch (e) {}
+}
+
+// ---------- Server calls ----------
+
+// Every check-in call carries the session token. If the server says it is no longer
+// good (expired, or the usher was switched off), go back to the login screen.
+async function api(fn, args) {
+  const used = session;
+  if (!used) return { data: null, error: { message: 'Not logged in' }, expired: true };
+
+  let res;
+  try {
+    res = await sb.rpc(fn, { p_session: used, ...args });
+  } catch (e) {
+    return { data: null, error: { message: String((e && e.message) || e) } };
+  }
+
+  if (res.data && res.data.status === 'unauthorized') {
+    if (session === used) await expireSession();
+    return { data: null, error: { message: 'Session expired' }, expired: true };
+  }
+  return res;
+}
+
+async function expireSession() {
+  session = null;
+  saveSession(null);
+  $('loginMsg').textContent = 'Session expired. Please log in again.';
+  await show(false);
+}
 
 // ---------- UI state ----------
 
@@ -68,6 +117,10 @@ async function show(isIn) {
   } else {
     clearInterval(pollTimer);
     await stopScanner();
+    releaseAwake();
+    lastToken = '';
+    $('counter').textContent = 'Checked in: - / -';
+    setResult('', IDLE_MSG);
   }
 }
 
@@ -80,6 +133,10 @@ function setResult(cls, msg) {
 // Keep the phone screen on while ushers are scanning
 async function keepAwake() {
   try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+function releaseAwake() {
+  try { if (wake) wake.release(); } catch (e) {}
+  wake = null;
 }
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && loggedIn) keepAwake();
@@ -123,7 +180,7 @@ function onScan(text) {
   lastToken = token;
   lastAt = now;
   if (!UUID_RE.test(token)) return setResult('bad', 'Not a valid ticket');
-  checkIn('check_in', { p_token: token });
+  checkIn('usher_check_in', { p_token: token });
 }
 
 // ---------- Check-in + counter ----------
@@ -131,8 +188,10 @@ function onScan(text) {
 async function checkIn(fn, args) {
   busy = true;
   setResult('', 'Checking...');
-  const { data, error } = await sb.rpc(fn, args);
+  const { data, error, expired } = await api(fn, args);
   busy = false;
+
+  if (expired) return; // api() already sent the usher back to the login screen
 
   if (error) {
     lastToken = ''; // allow an immediate retry of the same QR
@@ -150,32 +209,66 @@ async function checkIn(fn, args) {
 }
 
 async function refreshCounts() {
-  const { data, error } = await sb.rpc('get_counts');
+  const { data, error } = await api('usher_get_counts', {});
   if (!error && data) $('counter').textContent = 'Checked in: ' + data.checked_in + ' / ' + data.total;
 }
 
-// ---------- Auth + events ----------
+// ---------- Login + events ----------
 
 $('loginBtn').onclick = async () => {
+  const username = $('username').value.trim();
+  const password = $('password').value;
   $('loginMsg').textContent = '';
-  const { error } = await sb.auth.signInWithPassword({
-    email: $('email').value.trim(),
-    password: $('password').value,
-  });
-  if (error) $('loginMsg').textContent = error.message;
+  if (!username || !password) {
+    $('loginMsg').textContent = 'Enter your username and password';
+    return;
+  }
+
+  $('loginBtn').disabled = true;
+  const { data, error } = await sb.rpc('usher_login', { p_username: username, p_password: password });
+  $('loginBtn').disabled = false;
+
+  if (error) {
+    $('loginMsg').textContent = 'Error: ' + error.message;
+  } else if (data.status === 'ok') {
+    session = data.token;
+    saveSession(session);
+    $('password').value = '';
+    show(true);
+  } else if (data.status === 'locked') {
+    const mins = Math.max(1, Math.ceil(data.retry_after / 60));
+    $('loginMsg').textContent = 'Too many wrong attempts. Try again in ' + mins + ' min.';
+  } else {
+    $('loginMsg').textContent = 'Wrong username or password';
+  }
 };
+$('username').onkeydown = e => { if (e.key === 'Enter') $('password').focus(); };
 $('password').onkeydown = e => { if (e.key === 'Enter') $('loginBtn').click(); };
-$('logoutBtn').onclick = () => sb.auth.signOut();
+
+$('logoutBtn').onclick = async () => {
+  const old = session;
+  session = null;
+  saveSession(null);
+  show(false);
+  try { await sb.rpc('usher_logout', { p_session: old }); } catch (e) {} // best effort
+};
 
 $('manualBtn').onclick = () => {
   const email = $('manualEmail').value.trim();
   if (!email) return;
   $('manualEmail').value = '';
-  checkIn('check_in_by_email', { p_email: email });
+  checkIn('usher_check_in_by_email', { p_email: email });
 };
 
-sb.auth.onAuthStateChange((_event, session) => show(!!session));
-sb.auth.getSession().then(({ data }) => show(!!data.session));
+// ---------- Start ----------
+
+(async function init() {
+  session = loadSession();
+  if (!session) return show(false);
+  $('login').hidden = true; // hold the form back while the saved login is checked
+  const check = await api('usher_get_counts', {});
+  if (!check.expired) show(true); // if expired, api() already showed the login screen
+})();
 </script>
 </body>
 </html>
