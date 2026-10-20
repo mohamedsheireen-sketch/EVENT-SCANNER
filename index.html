@@ -42,12 +42,12 @@
   #loginMsg { color: #c00; }
 
   /* top bar: who is logged in, and the actions for their role */
-  .topbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 2px 0 10px; border-bottom: 1px solid var(--line); }
-  .who { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+  .topbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 10px; padding: 2px 0 10px; border-bottom: 1px solid var(--line); }
+  .who { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; flex: 1 1 130px; min-width: 0; }
   .who-name { max-width: 100%; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .chip { font-size: 12px; line-height: 1; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); white-space: nowrap; }
   .chip.lead { background: var(--ink); border-color: var(--ink); color: #fff; }
-  .actions { display: flex; gap: 6px; flex: none; }
+  .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
   .actions button { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 
   /* team panel (Team Leaders) */
@@ -75,6 +75,23 @@
   .m-meta.warn { color: var(--danger); }
   .m-actions { display: flex; gap: 6px; flex: none; }
   .tag { margin-left: 6px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; font-weight: 400; color: var(--muted); }
+  .tag.ok { border-color: #9fcfa9; background: #eef8f0; color: #1d6b32; }
+
+  /* attendees panel (Team Leaders) */
+  input[type="search"] { -webkit-appearance: none; appearance: none; }
+  .seg { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+  .seg button[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .atts { list-style: none; margin: 8px 0 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; }
+  .atts li { padding: 10px 12px; }
+  .atts li + li { border-top: 1px solid var(--line); }
+  .a-main { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .a-info { min-width: 0; }
+  .a-info .m-meta { overflow-wrap: anywhere; }
+  .a-main button { flex: none; }
+  .a-qr { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; text-align: center; }
+  .a-qr svg { display: block; width: min(240px, 100%); height: auto; margin: 0 auto; }
+  .a-qr code { display: block; margin-top: 8px; font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+  #attMore { display: block; margin: 10px auto 0; }
 </style>
 </head>
 <body>
@@ -94,6 +111,10 @@
       <span id="whoRole" class="chip" hidden></span>
     </div>
     <div class="actions">
+      <button id="attBtn" class="small" type="button" aria-haspopup="dialog" hidden>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <span>Attendees</span>
+      </button>
       <button id="teamBtn" class="small" type="button" aria-haspopup="dialog" hidden>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
         <span>Manage team</span>
@@ -156,8 +177,35 @@
   </div>
 </div>
 
+<div id="attPanel" class="sheet" role="dialog" aria-modal="true" aria-labelledby="attTitle" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="attTitle">Attendees <span id="attCount" class="muted"></span></h2>
+      <button id="attClose" class="small" type="button">Close</button>
+    </div>
+
+    <label for="attSearch">Search</label>
+    <input id="attSearch" type="search" placeholder="Name, email or ticket ID" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+
+    <div id="attFilters" class="seg" role="group" aria-label="Show">
+      <button class="small" type="button" data-filter="all" aria-pressed="true">All</button>
+      <button class="small" type="button" data-filter="in" aria-pressed="false">Checked in</button>
+      <button class="small" type="button" data-filter="out" aria-pressed="false">Not yet</button>
+    </div>
+
+    <div class="row">
+      <button id="attRefresh" class="small" type="button">Refresh</button>
+    </div>
+    <p id="attMsg" class="msg" role="status"></p>
+    <ul id="attList" class="atts" hidden></ul>
+    <p id="attEmpty" class="muted" hidden></p>
+    <button id="attMore" class="small" type="button" hidden></button>
+  </div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
 <script>
 const SUPABASE_URL = 'https://nnrmgriggjjwxicztngd.supabase.co';
 // Publishable key: safe in the browser. It can only call the usher_* functions;
@@ -184,8 +232,12 @@ let session = null;   // the usher's session token, issued by usher_login
 let me = null;        // { username, role } of whoever is logged in
 let loggedIn = null, scanner = null, scanning = false;
 let busy = false, lastToken = '', lastAt = 0, pollTimer = null, wake = null;
-let panelOpen = false, returnFocus = null;
+let teamOpen = false, returnFocus = null;
 let team = [], teamLoaded = false, pendingDelete = null, created = null;
+const ATT_PAGE = 100;   // attendee rows drawn at a time, so a long list stays quick on a phone
+const FILTER_LABEL = { all: 'All', in: 'Checked in', out: 'Not yet' };
+let attOpen = false, attReturnFocus = null;
+let attendees = [], attLoaded = false, attFilter = 'all', attQuery = '', attLimit = ATT_PAGE, attQrId = null;
 
 // ---------- Saved login (kept in this browser so a refresh doesn't log the usher out) ----------
 
@@ -225,6 +277,7 @@ function renderWho() {
   chip.textContent = me ? ROLE_LABEL[me.role] : '';
   chip.className = 'chip' + (isLeader() ? ' lead' : '');
   $('teamBtn').hidden = !isLeader();
+  $('attBtn').hidden = !isLeader();
 }
 
 // ---------- Server calls ----------
@@ -271,6 +324,7 @@ async function show(isIn) {
     keepAwake();
   } else {
     closeTeam();
+    closeAttendees();
     setMe(null);
     clearInterval(pollTimer);
     await stopScanner();
@@ -336,7 +390,7 @@ async function stopScanner() {
 }
 
 function onScan(text) {
-  if (panelOpen) return; // the team panel is covering the camera: don't check anyone in by accident
+  if (teamOpen || attOpen) return; // a panel is covering the camera: don't check anyone in by accident
   const token = text.trim();
   const now = Date.now();
   // ignore reads while a check is running, and the same QR for 8s after it was read
@@ -380,8 +434,8 @@ async function refreshCounts() {
 // ---------- Team panel (Team Leaders: add and delete Registration Team accounts) ----------
 
 function openTeam() {
-  if (!isLeader() || panelOpen) return;
-  panelOpen = true;
+  if (!isLeader() || teamOpen || attOpen) return;
+  teamOpen = true;
   returnFocus = document.activeElement;
   $('app').inert = true; // keyboard and screen readers stay inside the panel
   $('teamPanel').hidden = false;
@@ -396,8 +450,8 @@ function openTeam() {
 }
 
 function closeTeam() {
-  if (!panelOpen) return;
-  panelOpen = false;
+  if (!teamOpen) return;
+  teamOpen = false;
   $('teamPanel').hidden = true;
   $('app').inert = false;
   document.body.style.overflow = '';
@@ -415,6 +469,7 @@ function closeTeam() {
 function lostLeaderRole() {
   setMe({ username: me ? me.username : '', role: 'registration' });
   closeTeam();
+  closeAttendees();
   setResult('warn', 'Your account is no longer a Team Leader.');
 }
 
@@ -422,7 +477,7 @@ async function loadTeam(quiet) {
   $('listRetry').hidden = true;
   if (!quiet) setMsg('listMsg', 'Loading...');
   const { data, error, expired } = await api('usher_list_team', {});
-  if (expired || !panelOpen) return;
+  if (expired || !teamOpen) return;
   if (!error && data && data.status === 'forbidden') return lostLeaderRole();
   if (error || !data || data.status !== 'ok') {
     setMsg('listMsg', "Couldn't load the team" + (error ? ': ' + error.message : '') + '.', true);
@@ -504,7 +559,7 @@ async function deleteMember(id, button) {
   button.disabled = true;
   const gone = team.find(m => m.id === id);
   const { data, error, expired } = await api('usher_delete_member', { p_id: id });
-  if (expired || !panelOpen) return;
+  if (expired || !teamOpen) return;
   pendingDelete = null;
   if (error) {
     renderMembers();
@@ -621,7 +676,201 @@ $('addForm').addEventListener('submit', async e => {
 $('teamBtn').onclick = openTeam;
 $('teamClose').onclick = closeTeam;
 $('listRetry').onclick = () => loadTeam();
-document.addEventListener('keydown', e => { if (e.key === 'Escape' && panelOpen) closeTeam(); });
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (teamOpen) closeTeam();
+  else if (attOpen) closeAttendees();
+});
+
+// ---------- Attendees panel (Team Leaders: every attendee, their status and their QR) ----------
+
+function openAttendees() {
+  if (!isLeader() || teamOpen || attOpen) return;
+  attOpen = true;
+  attReturnFocus = document.activeElement;
+  $('app').inert = true; // keyboard and screen readers stay inside the panel
+  $('attPanel').hidden = false;
+  document.body.style.overflow = 'hidden';
+  attendees = []; attLoaded = false; attFilter = 'all'; attQuery = ''; attLimit = ATT_PAGE; attQrId = null;
+  $('attSearch').value = '';
+  $('attRefresh').disabled = false;
+  setMsg('attMsg', '');
+  renderAttendees();
+  loadAttendees();
+  $('attClose').focus();
+}
+
+function closeAttendees() {
+  if (!attOpen) return;
+  attOpen = false;
+  $('attPanel').hidden = true;
+  $('app').inert = false;
+  document.body.style.overflow = '';
+  // don't keep attendee details (names, emails, ticket IDs) around once the panel is closed
+  attendees = []; attLoaded = false; attQrId = null;
+  $('attList').textContent = '';
+  $('attSearch').value = '';
+  const back = attReturnFocus;
+  attReturnFocus = null;
+  if (back && back.focus && !$('app').hidden) { try { back.focus(); } catch (e) {} }
+}
+
+async function loadAttendees() {
+  $('attRefresh').disabled = true;
+  setMsg('attMsg', 'Loading...');
+  const { data, error, expired } = await api('usher_list_attendees', {});
+  $('attRefresh').disabled = false;
+  if (expired || !attOpen) return;
+  if (!error && data && data.status === 'forbidden') return lostLeaderRole();
+  if (error || !data || data.status !== 'ok') {
+    setMsg('attMsg', "Couldn't load the attendees" + (error ? ': ' + error.message : '') + '. Tap Refresh to try again.', true);
+    return;
+  }
+  attendees = Array.isArray(data.attendees) ? data.attendees : [];
+  attLoaded = true;
+  setMsg('attMsg', 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '.');
+  renderAttendees();
+}
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (d.toDateString() === new Date().toDateString()) return time;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ', ' + time;
+}
+
+function attMatches(a) {
+  if (attFilter === 'in' && !a.attended) return false;
+  if (attFilter === 'out' && a.attended) return false;
+  if (!attQuery) return true;
+  return (String(a.name || '') + ' ' + String(a.email || '') + ' ' + String(a.id || '')).toLowerCase().includes(attQuery);
+}
+
+// The QR holds just the ticket ID (the attendee's id): the same value the scanner reads at the door.
+function qrBlock(id) {
+  const box = document.createElement('div');
+  box.className = 'a-qr';
+  const text = String(id);
+  if (UUID_RE.test(text) && typeof qrcode === 'function') {
+    try {
+      const qr = qrcode(0, 'M');
+      qr.addData(text);
+      qr.make();
+      box.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 4, scalable: true, title: 'Ticket QR code' }); // built from the checked ticket ID only
+    } catch (e) { box.textContent = ''; }
+  }
+  if (!box.firstChild) {
+    const note = document.createElement('div');
+    note.className = 'm-meta';
+    note.textContent = 'QR image unavailable. The ticket ID is below.';
+    box.append(note);
+  }
+  const code = document.createElement('code');
+  code.textContent = text; // text, never HTML
+  box.append(code);
+  return box;
+}
+
+function attRow(a) {
+  const li = document.createElement('li');
+  li.dataset.id = a.id;
+
+  const info = document.createElement('div');
+  info.className = 'a-info';
+  const name = document.createElement('div');
+  name.className = 'm-name';
+  name.textContent = a.name || '(no name)'; // text, never HTML
+  const tag = document.createElement('span');
+  tag.className = 'tag' + (a.attended ? ' ok' : '');
+  tag.textContent = a.attended ? 'Checked in' : 'Not yet';
+  name.append(tag);
+  const email = document.createElement('div');
+  email.className = 'm-meta';
+  email.textContent = a.email || '';
+  info.append(name, email);
+  if (a.attended && a.attended_at) {
+    const at = document.createElement('div');
+    at.className = 'm-meta';
+    at.textContent = 'Checked in ' + fmtTime(a.attended_at);
+    info.append(at);
+  }
+
+  const open = attQrId === a.id;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'small';
+  btn.dataset.act = 'qr';
+  btn.textContent = open ? 'Hide QR' : 'Show QR';
+  btn.setAttribute('aria-expanded', String(open));
+  btn.setAttribute('aria-label', (open ? 'Hide QR for ' : 'Show QR for ') + (a.name || a.email || 'attendee'));
+
+  const main = document.createElement('div');
+  main.className = 'a-main';
+  main.append(info, btn);
+  li.append(main);
+  if (open) li.append(qrBlock(a.id));
+  return li;
+}
+
+function renderAttendees() {
+  const total = attendees.length;
+  const inCount = attendees.reduce((n, a) => n + (a.attended ? 1 : 0), 0);
+  const counts = { all: total, in: inCount, out: total - inCount };
+  $('attCount').textContent = attLoaded ? '(' + total + ')' : '';
+  for (const b of $('attFilters').children) {
+    const f = b.dataset.filter;
+    b.textContent = FILTER_LABEL[f] + (attLoaded ? ' (' + counts[f] + ')' : '');
+    b.setAttribute('aria-pressed', String(attFilter === f));
+  }
+
+  const matches = attendees.filter(attMatches);
+  const shown = matches.slice(0, attLimit);
+  const ul = $('attList');
+  ul.textContent = '';
+  for (const a of shown) ul.append(attRow(a));
+  ul.hidden = shown.length === 0;
+
+  $('attEmpty').hidden = !(attLoaded && matches.length === 0);
+  $('attEmpty').textContent = total === 0 ? 'No attendees yet.' : 'No attendees match.';
+  $('attMore').hidden = matches.length <= shown.length;
+  $('attMore').textContent = 'Show more (' + (matches.length - shown.length) + ' left)';
+}
+
+function focusAttButton(id) {
+  for (const li of $('attList').children) {
+    if (li.dataset.id === id) {
+      const b = li.querySelector('button[data-act="qr"]');
+      if (b) { b.focus(); li.scrollIntoView({ block: 'nearest' }); }
+      return;
+    }
+  }
+}
+
+$('attList').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act="qr"]');
+  if (!b) return;
+  const id = b.closest('li').dataset.id;
+  attQrId = attQrId === id ? null : id; // one QR open at a time
+  renderAttendees();
+  focusAttButton(id);
+});
+$('attFilters').addEventListener('click', e => {
+  const b = e.target.closest('button[data-filter]');
+  if (!b) return;
+  attFilter = b.dataset.filter;
+  attLimit = ATT_PAGE;
+  renderAttendees();
+});
+$('attSearch').addEventListener('input', e => {
+  attQuery = e.target.value.trim().toLowerCase();
+  attLimit = ATT_PAGE;
+  renderAttendees();
+});
+$('attMore').onclick = () => { attLimit += ATT_PAGE; renderAttendees(); };
+$('attRefresh').onclick = () => loadAttendees();
+$('attBtn').onclick = openAttendees;
+$('attClose').onclick = closeAttendees;
 
 // ---------- Login + events ----------
 
