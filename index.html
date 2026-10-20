@@ -91,8 +91,11 @@
   .a-qr { margin-top: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: #fff; text-align: center; }
   .a-qr svg { display: block; width: min(240px, 100%); height: auto; margin: 0 auto; }
   .a-qr code { display: block; margin-top: 8px; font: 600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
-  #attMore { display: block; margin: 10px auto 0; }
-</style>
+  .a-details { display: grid; grid-template-columns: max-content 1fr; gap: 6px 12px; margin: 10px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); font-size: 14px; }
+  .a-details dt { color: var(--muted); }
+  .a-details dd { margin: 0; overflow-wrap: anywhere; }
+  .a-details a { color: var(--focus); }
+  #attMore { display: block; margin: 10px auto 0; }</style>
 </head>
 <body>
 
@@ -185,7 +188,7 @@
     </div>
 
     <label for="attSearch">Search</label>
-    <input id="attSearch" type="search" placeholder="Name, email or ticket ID" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
+    <input id="attSearch" type="search" placeholder="Name, email, phone, ID number or ticket ID" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false">
 
     <div id="attFilters" class="seg" role="group" aria-label="Show">
       <button class="small" type="button" data-filter="all" aria-pressed="true">All</button>
@@ -744,7 +747,7 @@ function attMatches(a) {
   if (attFilter === 'in' && !a.attended) return false;
   if (attFilter === 'out' && a.attended) return false;
   if (!attQuery) return true;
-  return (String(a.name || '') + ' ' + String(a.email || '') + ' ' + String(a.id || '')).toLowerCase().includes(attQuery);
+    return [a.name, a.email, a.phone, a.id_number, a.id].map(v => String(v || '')).join(' ').toLowerCase().includes(attQuery);
 }
 
 // The QR holds just the ticket ID (the attendee's id): the same value the scanner reads at the door.
@@ -770,6 +773,61 @@ function qrBlock(id) {
   code.textContent = text; // text, never HTML
   box.append(code);
   return box;
+}
+
+const TYPE_LABEL = { msa_student: 'MSA student', outcomer: 'Outcomer' };
+
+function fmtFull(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  return isNaN(d) ? '' : d.toLocaleString([], { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// id_photo_links is free text from the form (several uploads come joined by commas): keep only real http(s) links
+function photoLinks(text) {
+  const out = [];
+  for (const part of String(text || '').split(/[\s,]+/)) {
+    try {
+      const u = new URL(part);
+      if (u.protocol === 'https:' || u.protocol === 'http:') out.push(u.href);
+    } catch (e) {}
+  }
+  return out;
+}
+
+function detailRow(dl, label, value) {
+  const dt = document.createElement('dt');
+  dt.textContent = label;
+  const dd = document.createElement('dd');
+  if (value instanceof Node) dd.append(value);
+  else dd.textContent = value || '—'; // text, never HTML
+  dl.append(dt, dd);
+}
+
+function detailsBlock(a) {
+  const dl = document.createElement('dl');
+  dl.className = 'a-details';
+  detailRow(dl, 'Phone', a.phone);
+  detailRow(dl, 'Type', TYPE_LABEL[a.attendee_type] || a.attendee_type);
+  detailRow(dl, 'ID number', a.id_number);
+
+  const links = photoLinks(a.id_photo_links);
+  let photos = a.id_photo_links; // no valid link: show the text as it is
+  if (links.length) {
+    photos = document.createDocumentFragment();
+    links.forEach((href, i) => {
+      const link = document.createElement('a');
+      link.href = href;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.textContent = links.length > 1 ? 'Photo ' + (i + 1) : 'Open photo';
+      if (i) photos.append(' · ');
+      photos.append(link);
+    });
+  }
+  detailRow(dl, 'ID photo', photos);
+  detailRow(dl, 'Registered', fmtFull(a.created_at));
+  return dl;
 }
 
 function attRow(a) {
@@ -801,15 +859,15 @@ function attRow(a) {
   btn.type = 'button';
   btn.className = 'small';
   btn.dataset.act = 'qr';
-  btn.textContent = open ? 'Hide QR' : 'Show QR';
+  btn.textContent = open ? 'Hide' : 'Details';
   btn.setAttribute('aria-expanded', String(open));
-  btn.setAttribute('aria-label', (open ? 'Hide QR for ' : 'Show QR for ') + (a.name || a.email || 'attendee'));
+  btn.setAttribute('aria-label', (open ? 'Hide details for ' : 'Show details for ') + (a.name || a.email || 'attendee'));
 
   const main = document.createElement('div');
   main.className = 'a-main';
   main.append(info, btn);
   li.append(main);
-  if (open) li.append(qrBlock(a.id));
+   if (open) li.append(detailsBlock(a), qrBlock(a.id));
   return li;
 }
 
