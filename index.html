@@ -490,7 +490,7 @@ async function checkIn(fn, args) {
     setResult('ok', 'Welcome, ' + data.name);
     if (navigator.vibrate) navigator.vibrate(150);
   } else if (data.status === 'already') {
-    setResult('warn', 'Already checked in: ' + data.name + ' at ' + new Date(data.attended_at).toLocaleTimeString());
+    setResult('warn', 'Already checked in: ' + data.name + ' at ' + new Date(data.attended_at).toLocaleTimeString() + (data.checked_in_by ? ' by ' + data.checked_in_by : ''));
   } else {
     setResult('bad', 'Invalid ticket');
   }
@@ -896,7 +896,7 @@ function detailsBlock(a) {
     });
   }
   detailRow(dl, 'ID photo', photos);
-  detailRow(dl, 'Registered', fmtFull(a.created_at));
+  detailRow(dl, 'Registered', fmtFull(a.created_at));   if (a.attended) detailRow(dl, 'Checked in by', a.checked_in_by);
   return dl;
 }
 
@@ -920,8 +920,8 @@ function attRow(a) {
   if (a.attended && a.attended_at) {
     const at = document.createElement('div');
     at.className = 'm-meta';
-    at.textContent = 'Checked in ' + fmtTime(a.attended_at);
-    info.append(at);
+    at.textContent = 'Checked in ' + fmtTime(a.attended_at) + (a.checked_in_by ? ' by ' + a.checked_in_by : '');
+   info.append(at);
   }
 
   const open = attQrId === a.id;
